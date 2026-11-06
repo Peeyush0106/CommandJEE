@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "CommandJEE",
+    "slug": "commandjee",
+    "scheme": "jeecommand",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "android": {
+      "package": "com.commandjee.app"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

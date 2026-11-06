@@ -1,0 +1,14 @@
+{
+  "name": "commandjee",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace @commandjee/web run dev",
+    "dev:web": "npm --workspace @commandjee/web run dev",
+    "build:web": "npm --workspace @commandjee/web run build",
+    "typecheck:web": "npm --workspace @commandjee/web run typecheck"
+  }
+}

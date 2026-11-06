@@ -1,0 +1,10 @@
+node_modules
+.next
+.expo
+dist
+.env
+.env.local
+.firebase
+.firebase-debug.log
+*.jks
+*.keystore

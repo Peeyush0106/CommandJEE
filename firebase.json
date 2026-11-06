@@ -1,0 +1,5 @@
+{
+  "firestore":{"rules":"firestore.rules"},
+  "functions":{"source":"functions"},
+  "hosting":{"source":"apps/web","ignore":["firebase.json","**/.*","**/node_modules/**"]}
+}
