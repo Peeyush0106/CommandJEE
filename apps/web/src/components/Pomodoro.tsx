@@ -18,11 +18,12 @@ const PHASE_HUES: Record<Phase, [number, number]> = { focus: [185, 275], short: 
 type Saved = { active: boolean; phase: Phase; running: boolean; remaining: number; cycles: number; presetId: string; taskId: string | null; taskTitle: string | null; endAt: number | null };
 const KEY = "commandjee.pomodoro.v1";
 const presetOf = (id: string) => PRESETS.find((p) => p.id === id) ?? PRESETS[0];
-const secondsFor = (phase: Phase, presetId: string) => presetOf(presetId)[phase] * 60;
-const idle = (presetId = "classic"): Saved => ({ active: false, phase: "focus", running: false, remaining: secondsFor("focus", presetId), cycles: 0, presetId, taskId: null, taskTitle: null, endAt: null });
+const secondsFor = (phase: Phase, presetId: string, defaultFocusMinutes = 25) =>
+  (phase === "focus" && presetId === "classic" ? defaultFocusMinutes : presetOf(presetId)[phase]) * 60;
+const idle = (presetId = "classic", defaultFocusMinutes = 25): Saved => ({ active: false, phase: "focus", running: false, remaining: secondsFor("focus", presetId, defaultFocusMinutes), cycles: 0, presetId, taskId: null, taskTitle: null, endAt: null });
 
 export type PomodoroApi = Saved & {
-  fullscreen: boolean; total: number; progress: number;
+  fullscreen: boolean; total: number; progress: number; defaultFocusMinutes: number;
   start: (task?: { id: string; title: string } | null) => void;
   toggle: () => void; skip: () => void; stop: () => void;
   minimize: () => void; expand: () => void; setPreset: (id: string) => void;
@@ -44,45 +45,50 @@ function beep() {
   } catch { /* audio unavailable */ }
 }
 
-export function PomodoroProvider({ children, onFocusComplete }: { children: ReactNode; onFocusComplete: (minutes: number, taskId: string | null) => void }) {
-  const [s, setS] = useState<Saved>(() => idle());
+export function PomodoroProvider({ children, onFocusComplete, defaultFocusMinutes = 25, storageKey = KEY }: { children: ReactNode; onFocusComplete: (minutes: number, taskId: string | null) => void; defaultFocusMinutes?: number; storageKey?: string }) {
+  const [s, setS] = useState<Saved>(() => idle("classic", defaultFocusMinutes));
   const [fullscreen, setFullscreen] = useState(false);
   const sRef = useRef(s); sRef.current = s;
   const endAt = useRef<number | null>(null);
   const nativeFs = useRef(false);
   const cbRef = useRef(onFocusComplete); cbRef.current = onFocusComplete;
+  useEffect(() => {
+    if (!s.active && s.presetId === "classic" && s.phase === "focus") {
+      setS((current) => ({ ...current, remaining: secondsFor("focus", "classic", defaultFocusMinutes) }));
+    }
+  }, [defaultFocusMinutes, s.active, s.phase, s.presetId]);
 
   // restore after a refresh
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = localStorage.getItem(storageKey);
       if (!raw) return;
       const v = JSON.parse(raw) as Saved;
       if (!v.active) return;
       if (v.running && v.endAt) { endAt.current = v.endAt; v.remaining = Math.max(0, Math.ceil((v.endAt - Date.now()) / 1000)); }
       setS(v);
     } catch { /* ignore */ }
-  }, []);
-  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify({ ...s, endAt: endAt.current })); } catch { /* ignore */ } }, [s]);
+  }, [storageKey]);
+  useEffect(() => { try { localStorage.setItem(storageKey, JSON.stringify({ ...s, endAt: endAt.current })); } catch { /* ignore */ } }, [s, storageKey]);
 
   const enter = useCallback((phase: Phase, base: Saved, run: boolean): Saved => {
-    const remaining = secondsFor(phase, base.presetId);
+    const remaining = secondsFor(phase, base.presetId, defaultFocusMinutes);
     endAt.current = run ? Date.now() + remaining * 1000 : null;
     return { ...base, phase, remaining, running: run, endAt: endAt.current };
-  }, []);
+  }, [defaultFocusMinutes]);
 
   const complete = useCallback(() => {
     const cur = sRef.current;
     const preset = presetOf(cur.presetId);
     beep();
     if (cur.phase === "focus") {
-      cbRef.current(preset.focus, cur.taskId);
+      cbRef.current(cur.presetId === "classic" ? defaultFocusMinutes : preset.focus, cur.taskId);
       const cycles = cur.cycles + 1;
       setS(enter(cycles % preset.every === 0 ? "long" : "short", { ...cur, cycles }, true));
     } else {
       setS(enter("focus", cur, true));
     }
-  }, [enter]);
+  }, [enter, defaultFocusMinutes]);
 
   useEffect(() => {
     if (!s.running) return;
@@ -95,7 +101,7 @@ export function PomodoroProvider({ children, onFocusComplete }: { children: Reac
     return () => clearInterval(id);
   }, [s.running, complete]);
 
-  const total = secondsFor(s.phase, s.presetId);
+  const total = secondsFor(s.phase, s.presetId, defaultFocusMinutes);
   const progress = Math.min(1, Math.max(0, 1 - s.remaining / total));
 
   useEffect(() => {
@@ -119,7 +125,7 @@ export function PomodoroProvider({ children, onFocusComplete }: { children: Reac
   }, []);
 
   const api = useMemo<PomodoroApi>(() => ({
-    ...s, fullscreen, total, progress,
+    ...s, fullscreen, total, progress, defaultFocusMinutes,
     start: (task) => { setS((p) => enter("focus", { ...p, active: true, taskId: task?.id ?? null, taskTitle: task?.title ?? null }, true)); enterFs(); },
     toggle: () => setS((p) => {
       if (!p.active) return enter("focus", { ...p, active: true }, true);
@@ -129,10 +135,10 @@ export function PomodoroProvider({ children, onFocusComplete }: { children: Reac
     skip: () => { const cur = sRef.current; const preset = presetOf(cur.presetId);
       if (cur.phase === "focus") { const cycles = cur.cycles + 1; setS(enter(cycles % preset.every === 0 ? "long" : "short", { ...cur, cycles }, cur.running)); }
       else setS(enter("focus", cur, cur.running)); },
-    stop: () => { endAt.current = null; setS(idle(sRef.current.presetId)); leaveFs(); },
+    stop: () => { endAt.current = null; setS(idle(sRef.current.presetId, defaultFocusMinutes)); leaveFs(); },
     minimize: leaveFs, expand: enterFs,
-    setPreset: (id) => setS((p) => (p.active ? p : { ...idle(id) })),
-  }), [s, fullscreen, total, progress, enter, enterFs, leaveFs]);
+    setPreset: (id) => setS((p) => (p.active ? p : { ...idle(id, defaultFocusMinutes) })),
+  }), [s, fullscreen, total, progress, enter, enterFs, leaveFs, defaultFocusMinutes]);
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }
@@ -268,7 +274,7 @@ export function PomodoroScreen({ tasks }: { tasks: Task[] }) {
           <button className="pomo-btn side" onClick={p.skip} aria-label="Skip to next phase" disabled={!p.active}><SkipForward size={18} /></button>
         </div>
         <div className="pomo-presets">
-          {PRESETS.map((x) => <button key={x.id} className={x.id === p.presetId ? "on" : ""} disabled={p.active && x.id !== p.presetId} onClick={() => p.setPreset(x.id)}>{x.label}</button>)}
+          {PRESETS.map((x) => <button key={x.id} className={x.id === p.presetId ? "on" : ""} disabled={p.active && x.id !== p.presetId} onClick={() => p.setPreset(x.id)}>{x.id === "classic" ? `Classic ${p.defaultFocusMinutes} · ${x.short}` : x.label}</button>)}
         </div>
         <div className="pomo-hint">Space to {p.running ? "pause" : "start"} · Esc to minimize</div>
       </div>

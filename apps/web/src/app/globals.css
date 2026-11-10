@@ -516,3 +516,64 @@ body.pomo-open .sidebar, body.pomo-open .content, body.pomo-open .tabbar, body.p
 .pomo-digits { text-shadow: 0 0 14px var(--n1), 0 0 42px color-mix(in srgb, var(--n2) 80%, transparent); }
 .pomo-canvas { image-rendering: auto; }
 .pomo-fallback { position: absolute; inset: -30%; background: conic-gradient(from 0deg, var(--n1), #04030c 25%, var(--n2) 50%, #04030c 75%, var(--n1)); opacity: .5; animation: spin 40s linear infinite; will-change: transform; }
+
+/* Authentication and first-run setup */
+.auth-shell { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(800px 500px at 50% 0%, var(--accent-soft), transparent 70%), var(--bg); }
+.auth-card { width: min(100%, 460px); padding: clamp(22px, 5vw, 36px); border: 1px solid var(--line); border-radius: 22px; background: var(--panel); box-shadow: var(--shadow-lg); }
+.auth-card h1 { margin: 20px 0 8px; font-size: clamp(24px, 5vw, 32px); letter-spacing: -.035em; }
+.auth-brand { padding: 0; margin-bottom: 20px; }
+.auth-form { display: grid; gap: 9px; margin-top: 20px; }
+.auth-form .btn { margin-top: 8px; }
+.auth-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; }
+.auth-foot { margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--faint); font-size: 12px; }
+.auth-message { margin-top: 14px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--green) 35%, var(--line)); border-radius: var(--r-sm); color: var(--green); font-size: 13px; overflow-wrap: anywhere; }
+.auth-message.error { border-color: color-mix(in srgb, var(--red) 45%, var(--line)); color: var(--red); }
+.onboarding-shell { align-items: start; padding-top: clamp(20px, 6vh, 60px); }
+.onboarding-card { width: min(100%, 640px); }
+.onboarding-progress { margin-bottom: 25px; }
+.onboarding-steps { display: flex; gap: 6px; margin-top: 12px; }
+.onboarding-steps span { height: 4px; flex: 1; border-radius: 4px; background: var(--panel-3); }
+.onboarding-steps span.on { background: var(--accent); }
+.onboarding-footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.weekday-picker { display: flex; flex-wrap: wrap; gap: 7px; }
+.weekday-picker button { min-width: 46px; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: 99px; background: var(--panel-2); color: var(--muted); font-size: 12px; }
+.weekday-picker button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.review-list { display: grid; gap: 0; border-top: 1px solid var(--line); }
+.review-list > div { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.review-list span { color: var(--muted); }
+.range-setting { padding: 15px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--panel-2); }
+input[type="range"] { width: 100%; accent-color: var(--accent-strong); }
+.class-chip, .account-row { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--panel-2); }
+.class-chip small, .account-method small { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+.settings-stack { display: grid; gap: 16px; }
+.settings-stack .settings { align-items: start; }
+.class-form, .class-exception { display: grid; gap: 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+.class-exception { margin-top: 22px; }
+.class-check { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.class-check input { accent-color: var(--accent); }
+.account-card { display: grid; gap: 12px; }
+.account-card .card-head { margin-bottom: 0; }
+.account-method { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.account-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 4px; }
+.account-confirm { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--panel-2); }
+.account-confirm > .row svg { color: var(--amber); flex: none; }
+.account-foot { padding-top: 10px; border-top: 1px solid var(--line); }
+.account-notice { margin: 12px clamp(16px, 3vw, 40px) 0; padding: 11px 14px; border: 1px solid color-mix(in srgb, var(--green) 40%, var(--line)); border-radius: var(--r-sm); background: color-mix(in srgb, var(--green) 9%, var(--panel)); color: var(--green); }
+.account-notice.warning { border-color: color-mix(in srgb, var(--amber) 45%, var(--line)); background: color-mix(in srgb, var(--amber) 9%, var(--panel)); color: var(--amber); }
+.account-notice .text-btn { margin-left: 8px; }
+.syllabus-heatmap { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 7px; }
+.heat-cell { min-height: 44px; display: flex; align-items: center; padding: 7px 9px; border: 1px solid var(--line); border-left: 3px solid var(--faint); border-radius: 7px; background: var(--panel-2); font-size: 11px; line-height: 1.25; }
+.heat-cell span { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.heat-cell.status-theory, .heat-cell.status-pyqs { border-left-color: var(--accent); }
+.heat-cell.status-revision { border-left-color: var(--amber); }
+.heat-cell.status-mastery { border-left-color: var(--green); background: color-mix(in srgb, var(--green) 8%, var(--panel)); }
+.heat-cell.status-complete_weak { border-left-color: var(--red); background: color-mix(in srgb, var(--red) 8%, var(--panel)); }
+.syllabus-subject { min-width: 0; }
+.warn { display: flex; align-items: flex-start; gap: 8px; }
+@media (max-width: 560px) {
+  .auth-shell { padding: 14px; align-items: start; }
+  .auth-card { padding: 22px 18px; }
+  .account-row { align-items: flex-start; flex-wrap: wrap; }
+  .account-row > .btn { width: 100%; }
+  .account-actions > .btn { flex: 1 1 100%; }
+}

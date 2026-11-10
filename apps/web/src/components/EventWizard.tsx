@@ -5,7 +5,7 @@ import { AlertTriangle, BookOpen, Check, GraduationCap, Presentation, RefreshCw,
 import type { Chapter, Subject } from "@commandjee/shared";
 import { Modal, Segmented } from "./ui";
 import { STATUS_LABEL, SUBJECTS, SUBJECT_SHORT, type TaskKind } from "../lib/constants";
-import { endTime, fmtDate, fmtMinutes, fromMinutes, toMinutes, today } from "../lib/date";
+import { addDays, endTime, fmtDate, fmtMinutes, fromISO, fromMinutes, logicalDateAt, tasksForLogicalDay, toMinutes } from "../lib/date";
 import type { Task } from "../lib/store";
 
 type Block = { subject: Subject; chapter: string; tasks: string[] };
@@ -29,21 +29,21 @@ const estimate = (blocks: Block[]) => {
   return 60;
 };
 
-export function suggestTime(tasks: Task[], date: string) {
-  const day = tasks.filter((t) => t.date === date).sort((a, b) => a.time.localeCompare(b.time));
-  let candidate = 13 * 60;
+export function suggestTime(tasks: Task[], date: string, dayStartMinutes = 0) {
+  const day = tasksForLogicalDay(tasks, date, dayStartMinutes);
+  let candidate = (13 * 60 - dayStartMinutes + 1440) % 1440;
   for (const t of day) {
-    const start = toMinutes(t.time);
+    const start = t.dayOffsetMinutes ?? toMinutes(t.time);
     if (candidate + 90 <= start) break;
     candidate = Math.max(candidate, start + t.minutes + 15);
   }
-  return fromMinutes(Math.min(candidate, 21 * 60 + 30));
+  return fromMinutes(dayStartMinutes + Math.min(candidate, (21 * 60 + 30 - dayStartMinutes + 1440) % 1440));
 }
 
-export default function EventWizard({ initialDate, chapters, tasks, onClose, onSave }: {
-  initialDate?: string; chapters: Chapter[]; tasks: Task[]; onClose: () => void; onSave: (t: Task) => void;
+export default function EventWizard({ initialDate, dayStartMinutes = 0, chapters, tasks, onClose, onSave }: {
+  initialDate?: string; dayStartMinutes?: number; chapters: Chapter[]; tasks: Task[]; onClose: () => void; onSave: (t: Task) => void;
 }) {
-  const startDate = initialDate ?? today();
+  const startDate = initialDate ?? logicalDateAt(new Date(), dayStartMinutes);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [type, setType] = useState<TaskKind>("study");
   const [subject, setSubject] = useState<Subject>("Physics");
@@ -51,7 +51,7 @@ export default function EventWizard({ initialDate, chapters, tasks, onClose, onS
   const [open, setOpen] = useState(false);
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [date, setDate] = useState(startDate);
-  const [time, setTime] = useState(() => suggestTime(tasks, startDate));
+  const [time, setTime] = useState(() => suggestTime(tasks, startDate, dayStartMinutes));
   const [minutes, setMinutes] = useState(90);
   const [custom, setCustom] = useState(false);
   const [customH, setCustomH] = useState(1);
@@ -126,9 +126,19 @@ export default function EventWizard({ initialDate, chapters, tasks, onClose, onS
   const duration = custom ? Math.max(5, customH * 60 + customM) : minutes;
 
   const conflicts = useMemo(() => {
-    const s = toMinutes(time), e = s + duration;
-    return tasks.filter((t) => t.date === date && s < toMinutes(t.time) + t.minutes && e > toMinutes(t.time));
-  }, [tasks, date, time, duration]);
+    const actualDate = toMinutes(time) < dayStartMinutes ? addDays(date, 1) : date;
+    const start = fromISO(actualDate);
+    const [hours, minutes] = time.split(":").map(Number);
+    start.setHours(hours || 0, minutes || 0, 0, 0);
+    const end = start.getTime() + duration * 60_000;
+    return tasks.filter((task) => {
+      const taskStart = fromISO(task.date);
+      const [taskHours, taskMinutes] = task.time.split(":").map(Number);
+      taskStart.setHours(taskHours || 0, taskMinutes || 0, 0, 0);
+      const taskEnd = taskStart.getTime() + task.minutes * 60_000;
+      return start.getTime() < taskEnd && end > taskStart.getTime();
+    });
+  }, [tasks, date, time, duration, dayStartMinutes]);
 
   const goSchedule = () => { setOpen(false); setMinutes(estimate(blocks)); setCustom(false); setStep(3); };
   const save = () => {
@@ -137,7 +147,8 @@ export default function EventWizard({ initialDate, chapters, tasks, onClose, onS
       title: shownTitle.trim() || autoTitle,
       subject: blocks.length === 0 ? "General" : new Set(blocks.map((b) => b.subject)).size === 1 ? blocks[0].subject : "Mixed",
       chapter: blocks.map((b) => b.chapter).join(" + "),
-      date, time, minutes: duration, kind: type, done: false,
+      date: toMinutes(time) < dayStartMinutes ? addDays(date, 1) : date,
+      time, minutes: duration, kind: type, done: false,
       items: blocks.length ? blocks.map((b) => ({ ...b, done: false })) : undefined,
     };
     onSave(task);
@@ -249,7 +260,7 @@ export default function EventWizard({ initialDate, chapters, tasks, onClose, onS
           <p className="muted">The start time is suggested from your existing blocks — adjust freely.</p>
           <div className="form-grid">
             <div><label className="label" htmlFor="ev-date">Date</label>
-              <input id="ev-date" className="field" type="date" value={date} onChange={(e) => { setDate(e.target.value); setTime(suggestTime(tasks, e.target.value)); }} /></div>
+              <input id="ev-date" className="field" type="date" value={date} onChange={(e) => { setDate(e.target.value); setTime(suggestTime(tasks, e.target.value, dayStartMinutes)); }} /></div>
             <div><label className="label" htmlFor="ev-time">Start time</label>
               <input id="ev-time" className="field" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></div>
             <div className="span">

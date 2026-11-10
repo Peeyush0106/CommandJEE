@@ -5,8 +5,8 @@ import { CardHead, Donut, EmptyState, Progress, Segmented } from "../ui";
 import TaskRow from "../TaskRow";
 import { RollText, clockText, useCountdown, useNow } from "../Now";
 import { usePomodoro } from "../Pomodoro";
-import { COUNTED_KINDS, KIND_COLOR, KIND_LABEL, SUBJECTS, SUBJECT_COLOR, SUBJECT_SHORT, type TaskKind } from "../../lib/constants";
-import { addDays, currentTask, endTime, fmtDate, fmtMinutes, minutesOfDay, toISO, toMinutes } from "../../lib/date";
+import { COUNTED_KINDS, KIND_COLOR, KIND_LABEL, PRIORITIES, SUBJECTS, SUBJECT_COLOR, SUBJECT_SHORT, type TaskKind } from "../../lib/constants";
+import { addDays, classesForLogicalDay, currentTask, endTime, fmtDate, fmtMinutes, fromISO, fromMinutes, logicalDateAt, minutesOfDay, tasksByLogicalDay, tasksForLogicalDay, toISO, toMinutes } from "../../lib/date";
 import { streak, studiedOn } from "../../lib/stats";
 import type { Store, Task } from "../../lib/store";
 
@@ -16,12 +16,13 @@ function dayOfYear(d: Date) { return Math.floor((d.getTime() - new Date(d.getFul
 
 /** Greedy column layout so overlapping blocks sit side by side. */
 function layout(tasks: Task[]) {
-  const sorted = [...tasks].sort((a, b) => toMinutes(a.time) - toMinutes(b.time));
+  const offset = (t: Task) => t.dayOffsetMinutes ?? toMinutes(t.time);
+  const sorted = [...tasks].sort((a, b) => offset(a) - offset(b));
   const out = new Map<string, { lane: number; lanes: number }>();
   let cluster: Task[] = [], laneEnds: number[] = [], clusterEnd = -1;
   const flush = () => { cluster.forEach((t) => (out.get(t.id)!.lanes = laneEnds.length)); cluster = []; laneEnds = []; };
   for (const t of sorted) {
-    const s = toMinutes(t.time), e = s + t.minutes;
+    const s = offset(t), e = s + t.minutes;
     if (s >= clusterEnd) { flush(); clusterEnd = -1; }
     let lane = laneEnds.findIndex((end) => end <= s);
     if (lane < 0) { lane = laneEnds.length; laneEnds.push(e); } else laneEnds[lane] = e;
@@ -39,31 +40,35 @@ export default function Today({ store, go, addBlock, onDelete }: { store: Store;
   const now = useNow();
   const pomo = usePomodoro();
   const cd = useCountdown(state.examDate);
-  const t0 = toISO(now);
+  const t0 = logicalDateAt(now, state.dayStartMinutes);
   const nowMin = minutesOfDay(now);
   const [filter, setFilter] = useState<"all" | "pending" | "done">("all");
+  const [view, setView] = useState<"day" | "syllabus">("day");
 
-  const day = useMemo(() => tasks.filter((t) => t.date === t0).sort((a, b) => a.time.localeCompare(b.time)), [tasks, t0]);
-  const tomorrow = tasks.filter((t) => t.date === addDays(t0, 1)).sort((a, b) => a.time.localeCompare(b.time));
+  const day = useMemo(() => tasksForLogicalDay(tasks, t0, state.dayStartMinutes), [tasks, t0, state.dayStartMinutes]);
+  const tomorrow = tasksForLogicalDay(tasks, addDays(t0, 1), state.dayStartMinutes);
+  const dayOffset = (time: number) => (time - state.dayStartMinutes + 1440) % 1440;
+  const nowOffset = dayOffset(nowMin);
   const live = currentTask(day, now);
-  const next = day.find((t) => !t.done && toMinutes(t.time) > nowMin) ?? null;
+  const next = day.find((t) => !t.done && (t.dayOffsetMinutes ?? dayOffset(toMinutes(t.time))) > nowOffset) ?? null;
 
   const planned = day.reduce((a, t) => a + t.minutes, 0);
   const doneMin = day.filter((t) => t.done).reduce((a, t) => a + t.minutes, 0);
   const studied = studiedOn(state, t0);
   const target = state.targetHours * 60;
-  const shouldBeDone = day.filter((t) => toMinutes(t.time) + t.minutes <= nowMin).reduce((a, t) => a + t.minutes, 0);
+  const shouldBeDone = day.filter((t) => (t.dayOffsetMinutes ?? dayOffset(toMinutes(t.time))) + t.minutes <= nowOffset).reduce((a, t) => a + t.minutes, 0);
   const behind = Math.max(0, shouldBeDone - doneMin);
   const last7 = Array.from({ length: 7 }, (_, i) => studiedOn(state, addDays(t0, -(i + 1))));
   const avg7 = last7.reduce((a, b) => a + b, 0) / 7;
   const focusToday = focusLog.filter((f) => f.date === t0);
   const focusMin = focusToday.reduce((a, f) => a + f.minutes, 0);
-  const minsLeftInDay = Math.max(0, 1440 - nowMin);
+  const minsLeftInDay = Math.max(0, 1440 - nowOffset);
   const unscheduled = Math.max(0, target - studied - day.filter((t) => !t.done && COUNTED_KINDS.includes(t.kind)).reduce((a, t) => a + t.minutes, 0));
 
   const events = day.filter((t) => t.kind === "mock" || t.kind === "coaching");
   const todaysMocks = mocks.filter((m) => m.date === t0);
-  const overdue = tasks.filter((t) => t.date < t0 && !t.done);
+  const overdue = [...tasksByLogicalDay(tasks, state.dayStartMinutes)]
+    .filter(([date]) => date < t0).flatMap(([, items]) => items.filter((t) => !t.done));
   const revisions = chapters.filter((c) => c.status === "revision");
   const weak = chapters.filter((c) => c.status === "complete_weak").sort((a, b) => a.priority.localeCompare(b.priority));
   const upNext = chapters.filter((c) => c.priority === "P1" && c.status === "pending").slice(0, 3);
@@ -72,26 +77,28 @@ export default function Today({ store, go, addBlock, onDelete }: { store: Store;
   const byKind = (Object.keys(KIND_LABEL) as TaskKind[]).map((k) => ({ k, min: day.filter((t) => t.kind === k).reduce((a, t) => a + t.minutes, 0) })).filter((x) => x.min > 0);
 
   /* timeline range */
-  const startH = Math.min(6, day.length ? Math.floor(Math.min(...day.map((t) => toMinutes(t.time))) / 60) : 6);
-  const endH = Math.min(24, Math.max(23, day.length ? Math.ceil(Math.max(...day.map((t) => toMinutes(t.time) + t.minutes)) / 60) : 23));
+  const startH = 0;
+  const endH = 24;
   const lanes = useMemo(() => layout(day), [day]);
   const scroller = useRef<HTMLDivElement>(null);
-  useEffect(() => { const el = scroller.current; if (el) el.scrollTop = Math.max(0, ((nowMin / 60) - startH - 1.5) * HOUR); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const nowTop = (nowMin / 60 - startH) * HOUR;
+  useEffect(() => { const el = scroller.current; if (el) el.scrollTop = Math.max(0, ((nowOffset / 60) - 1.5) * HOUR); }, [nowOffset]);
+  const nowTop = (nowOffset / 60) * HOUR;
 
   const shown = day.filter((t) => (filter === "all" ? true : filter === "done" ? t.done : !t.done));
   const planPct = planned ? Math.round((doneMin / planned) * 100) : 0;
 
   return (
     <div className="stack">
+      <div className="between"><div><div className="eyebrow">Daily workspace</div><p className="muted small">Your day begins at {fromMinutes(state.dayStartMinutes)}.</p></div><Segmented label="Today view" value={view} onChange={setView} options={[{ value: "day", label: "Day" }, { value: "syllabus", label: "Syllabus" }]} /></div>
+      <div hidden={view === "syllabus"}>
       <section className="today-hero">
         <div className="th-clock">
-          <div className="eyebrow">{fmtDate(t0, { weekday: "long" })} · Day {dayOfYear(now)} of {dayOfYear(new Date(now.getFullYear(), 11, 31))}</div>
+          <div className="eyebrow">{fmtDate(t0, { weekday: "long" })} · Day {dayOfYear(fromISO(t0))} of {dayOfYear(new Date(fromISO(t0).getFullYear(), 11, 31))}</div>
           <div className="th-time"><RollText text={clockText(now)} /></div>
           <div className="th-date">{fmtDate(t0, { day: "numeric", month: "long", year: "numeric" })}</div>
         </div>
         <div className="th-stats">
-          <div><span>Day elapsed</span><b>{Math.round((nowMin / 1440) * 100)}%</b><Progress value={(nowMin / 1440) * 100} /></div>
+          <div><span>Day elapsed</span><b>{Math.round((nowOffset / 1440) * 100)}%</b><Progress value={(nowOffset / 1440) * 100} /></div>
           <div><span>Left in the day</span><b>{fmtMinutes(minsLeftInDay)}</b></div>
           <div><span>Blocks done</span><b>{day.filter((t) => t.done).length}/{day.length}</b></div>
           <div><span>Exam in</span><b>{cd.d}d {cd.h}h</b></div>
@@ -101,7 +108,7 @@ export default function Today({ store, go, addBlock, onDelete }: { store: Store;
             <div className="now-card live"><span className="live-dot" /><div><small>Happening now</small><b>{live.title}</b><span>{live.time}–{endTime(live.time, live.minutes)}</span></div>
               <button className="btn sm" onClick={() => (pomo.active ? pomo.expand() : pomo.start({ id: live.id, title: live.title }))}><Timer size={14} /> {pomo.active ? "Open timer" : "Pomodoro"}</button></div>
           ) : next ? (
-            <div className="now-card"><div><small>Up next</small><b>{next.title}</b><span>at {next.time} · in {fmtMinutes(toMinutes(next.time) - nowMin)}</span></div></div>
+            <div className="now-card"><div><small>Up next</small><b>{next.title}</b><span>at {next.time} · in {fmtMinutes((next.dayOffsetMinutes ?? dayOffset(toMinutes(next.time))) - nowOffset)}</span></div></div>
           ) : (
             <div className="now-card"><div><small>Nothing scheduled right now</small><b>{day.length ? "All blocks for today are behind you" : "Your day is open"}</b></div>
               <button className="btn sm primary" onClick={addBlock}><CalendarPlus size={14} /> Add block</button></div>
@@ -114,13 +121,13 @@ export default function Today({ store, go, addBlock, onDelete }: { store: Store;
           <section className="card">
             <CardHead title="Timeline" sub="Your blocks across the day · red line is now" right={<button className="btn sm primary" onClick={addBlock}><CalendarPlus size={14} /> Add block</button>} />
             <div className="timeline-scroll" ref={scroller}>
-              <div className="timeline" style={{ height: (endH - startH) * HOUR }}>
+              <div className="timeline full-day" style={{ height: (endH - startH) * HOUR }}>
                 {Array.from({ length: endH - startH + 1 }, (_, i) => (
-                  <div className="tl-hour" key={i} style={{ top: i * HOUR }}><span>{String(startH + i).padStart(2, "0")}:00</span></div>
+                    <div className="tl-hour" key={i} style={{ top: i * HOUR }}><span>{fromMinutes(state.dayStartMinutes + i * 60)}</span></div>
                 ))}
                 {day.map((t) => {
                   const l = lanes.get(t.id)!;
-                  const top = ((toMinutes(t.time) / 60) - startH) * HOUR;
+                    const top = ((t.dayOffsetMinutes ?? dayOffset(toMinutes(t.time))) / 60) * HOUR;
                   return (
                     <button key={t.id} className={`tl-block ${t.done ? "done" : ""} ${live?.id === t.id ? "live" : ""}`}
                       style={{ top, height: Math.max(t.minutes / 60 * HOUR - 3, 28), left: `calc(58px + (100% - 62px) * ${l.lane / l.lanes})`, width: `calc((100% - 62px) / ${l.lanes} - 4px)`, "--k": KIND_COLOR[t.kind] } as CSSProperties}
@@ -132,6 +139,12 @@ export default function Today({ store, go, addBlock, onDelete }: { store: Store;
                 {nowTop >= 0 && nowTop <= (endH - startH) * HOUR && <div className="tl-now" style={{ top: nowTop }}><span>{clockText(now).slice(0, 5)}</span></div>}
               </div>
             </div>
+          </section>
+
+          <section className="card">
+            <CardHead title="Recurring classes" sub={fmtDate(t0, { weekday: "long", day: "numeric", month: "long" })} />
+            {classesForLogicalDay(state.classes, t0, state.dayStartMinutes).length ? <div className="list">{classesForLogicalDay(state.classes, t0, state.dayStartMinutes).map((item) => <div className="row-item" key={item.id}><i className="dot lg" style={{ background: KIND_COLOR.coaching }} /><div className="grow"><b>{item.title}</b><div className="muted small">{item.time}–{endTime(item.time, item.minutes)} · {item.subject}</div></div><span className="badge">Class</span></div>)}</div>
+              : <EmptyState title="No recurring classes today">Add your weekly coaching schedule in Settings.</EmptyState>}
           </section>
 
           <section className="card">
@@ -208,8 +221,40 @@ export default function Today({ store, go, addBlock, onDelete }: { store: Store;
           </section>
         </div>
       </div>
+      </div>
+      <SyllabusOverview store={store} hidden={view !== "syllabus"} />
     </div>
   );
+}
+
+function SyllabusOverview({ store, hidden }: { store: Store; hidden: boolean }) {
+  const { chapters, examDate } = store.state;
+  const now = useNow();
+  const todayKey = logicalDateAt(now, store.state.dayStartMinutes);
+  const daysLeft = Math.max(0, Math.ceil((new Date(`${examDate}T00:00:00`).getTime() - fromISO(todayKey).getTime()) / 864e5));
+  const remaining = chapters.filter((c) => c.status !== "mastery").length;
+  const perWeek = daysLeft ? Math.ceil((remaining / daysLeft) * 7) : remaining;
+  const projection = perWeek > 0 ? new Date(fromISO(todayKey).getTime() + Math.ceil(remaining / perWeek * 7) * 864e5) : fromISO(todayKey);
+  const risk = chapters.filter((c) => c.priority === "P1" && ["pending", "complete_weak", "revision"].includes(c.status));
+  return <section className="stack" hidden={hidden}>
+    <div className="grid-auto">
+      <div className="card kpi static"><div className="kpi-top"><span>Overall syllabus</span></div><div className="kpi-value">{Math.round(((chapters.length - remaining) / Math.max(chapters.length, 1)) * 100)}%</div><div className="kpi-hint">{chapters.length - remaining} of {chapters.length} mastered</div></div>
+      <div className="card kpi static"><div className="kpi-top"><span>Weekly pace needed</span></div><div className="kpi-value">{perWeek}</div><div className="kpi-hint">chapters per week until exam</div></div>
+      <div className="card kpi static"><div className="kpi-top"><span>Projected finish</span></div><div className="kpi-value sm">{fmtDate(toISO(projection), { day: "numeric", month: "short" })}</div><div className="kpi-hint">{daysLeft} days to target date</div></div>
+      <div className="card kpi static"><div className="kpi-top"><span>P1 at risk</span></div><div className="kpi-value">{risk.length}</div><div className="kpi-hint">pending, weak, or due for revision</div></div>
+    </div>
+    {SUBJECTS.map((subject) => {
+      const list = chapters.filter((c) => c.subject === subject);
+      const mastered = list.filter((c) => c.status === "mastery").length;
+      return <section className="card syllabus-subject" key={subject}><CardHead title={subject} sub={`${mastered} of ${list.length} chapters mastered`} right={<span className="badge">{Math.round(mastered / Math.max(list.length, 1) * 100)}%</span>} /><div className="syllabus-heatmap">{list.map((chapter) => <div className={`heat-cell status-${chapter.status}`} key={chapter.id} title={`${chapter.name} · ${chapter.status}`}><span>{chapter.name}</span></div>)}</div></section>;
+    })}
+    <section className="card"><CardHead title="Priority coverage" sub="Mastery progress by priority band" />{PRIORITIES.map((priority) => {
+      const list = chapters.filter((chapter) => chapter.priority === priority.key);
+      const covered = list.filter((chapter) => chapter.status === "mastery").length;
+      return <div className="priority-coverage" key={priority.key}><div className="between"><b>{priority.label}</b><span className="muted small">{covered}/{list.length}</span></div><Progress value={covered / Math.max(list.length, 1) * 100} /></div>;
+    })}</section>
+    <section className="card"><CardHead title="What's at risk this week" sub="P1 chapters pending, weak, or awaiting revision" />{risk.length ? <div className="list">{risk.slice(0, 10).map((chapter) => <div className="row-item" key={chapter.id}><span className="badge crit">{chapter.priority}</span><div className="grow"><b>{chapter.name}</b><div className="muted small">{chapter.subject} · {chapter.status.replace("_", " ")}</div></div></div>)}</div> : <EmptyState title="No priority chapters at risk">Your must-do chapters are mastered or in good progress.</EmptyState>}</section>
+  </section>;
 }
 
 function AttentionRow({ icon, label, items, go }: { icon: React.ReactNode; label: string; items: string[]; go: () => void }) {

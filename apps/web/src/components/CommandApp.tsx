@@ -1,6 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BookOpen, CalendarClock, CalendarDays, CalendarPlus, ChartNoAxesCombined, CheckCircle2, Ellipsis, LayoutDashboard, ListTodo, RefreshCw, Settings as SettingsIcon, Sparkles, Timer, User, X } from "lucide-react";
+import { BookOpen, CalendarClock, CalendarDays, CalendarPlus, ChartNoAxesCombined, CheckCircle2, Ellipsis, LayoutDashboard, ListTodo, RefreshCw, Settings as SettingsIcon, Sparkles, Timer, User as UserIcon, X } from "lucide-react";
 import type { Subject } from "@commandjee/shared";
 import { Modal, ToastContext, type ToastInput } from "./ui";
 import EventWizard from "./EventWizard";
@@ -19,11 +19,14 @@ import AIManager from "./pages/AIManager";
 import Settings from "./pages/Settings";
 import Profile from "./pages/Profile";
 import { useStore, type Store, type Task } from "../lib/store";
-import { exportBackup } from "../lib/backup";
 import { SUBJECTS } from "../lib/constants";
-import { toISO } from "../lib/date";
+import { logicalDateAt } from "../lib/date";
+import AuthGate from "./AuthGate";
+import Onboarding from "./Onboarding";
+import type { User } from "firebase/auth";
 
 type PageId = "dashboard" | "today" | "chapters" | "calendar" | "planner" | "revisions" | "mocks" | "ai" | "settings" | "profile";
+type AccountMeta = { deletionRequestedAt?: number; exportRequestedAt?: number; exportAvailableAt?: number; exportLastAt?: number; exportDownloadedAt?: number };
 type NavItem = { id: PageId | "pomodoro"; label: string; Icon: typeof BookOpen; group: string; primary?: boolean };
 const NAV: NavItem[] = [
   { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard, group: "Workspace", primary: true },
@@ -36,7 +39,7 @@ const NAV: NavItem[] = [
   { id: "mocks", label: "Mock Tests", Icon: ChartNoAxesCombined, group: "Performance" },
   { id: "ai", label: "AI Study Manager", Icon: Sparkles, group: "Command centre" },
   { id: "settings", label: "Settings", Icon: SettingsIcon, group: "System" },
-  { id: "profile", label: "Profile", Icon: User, group: "System" },
+  { id: "profile", label: "Profile", Icon: UserIcon, group: "System" },
 ];
 const GROUPS = ["Workspace", "Focus", "Performance", "Command centre", "System"];
 const PAGE_IDS = NAV.filter((n) => n.id !== "pomodoro").map((n) => n.id as PageId);
@@ -50,21 +53,22 @@ const parseHash = (): Route => {
 };
 
 export default function CommandApp() {
-  return <NowProvider><Shell /></NowProvider>;
+  return <NowProvider><AuthGate>{(authState) => <Shell {...authState} />}</AuthGate></NowProvider>;
 }
 
-function Shell() {
-  const store = useStore();
+function Shell({ user, accountMeta, notice, signOut }: { user: User; accountMeta: AccountMeta; notice: string; signOut: () => Promise<void> }) {
+  const store = useStore(user.uid);
   const onFocusComplete = useCallback((minutes: number, taskId: string | null) => {
-    store.addFocus({ id: Math.random().toString(36).slice(2, 10), date: toISO(new Date()), minutes, taskId: taskId ?? undefined, at: Date.now() });
-  }, [store.addFocus]); // eslint-disable-line react-hooks/exhaustive-deps
+    store.addFocus({ id: Math.random().toString(36).slice(2, 10), date: logicalDateAt(new Date(), store.state.dayStartMinutes), minutes, taskId: taskId ?? undefined, at: Date.now() });
+  }, [store.addFocus, store.state.dayStartMinutes]);
   if (!store.ready) return <div className="splash" aria-busy="true"><img className="logo-img lg" src="/logo.png" alt="CommandJEE" /></div>;
-  return <PomodoroProvider onFocusComplete={onFocusComplete}><App store={store} /></PomodoroProvider>;
+  if (!store.state.onboardingComplete) return <PomodoroProvider storageKey={`commandjee.pomodoro.v1.${user.uid}`} defaultFocusMinutes={store.state.pomodoroMinutes} onFocusComplete={onFocusComplete}><Onboarding store={store} /></PomodoroProvider>;
+  return <PomodoroProvider storageKey={`commandjee.pomodoro.v1.${user.uid}`} defaultFocusMinutes={store.state.pomodoroMinutes} onFocusComplete={onFocusComplete}><App store={store} user={user} accountMeta={accountMeta} notice={notice} signOut={signOut} /></PomodoroProvider>;
 }
 
 const SHORTCUTS: [string, string][] = [["N", "Add a study block"], ["P", "Open the Pomodoro timer"], ["T", "Go to Today"], ["D", "Go to Dashboard"], ["Space", "Start / pause (in Pomodoro)"], ["Esc", "Close dialog · minimize Pomodoro"], ["?", "Show this list"]];
 
-function App({ store }: { store: Store }) {
+function App({ store, user, accountMeta, notice, signOut }: { store: Store; user: User; accountMeta: AccountMeta; notice: string; signOut: () => Promise<void> }) {
   const { state } = store;
   const pomo = usePomodoro();
   const [route, setRoute] = useState<Route>({ page: "dashboard", param: null });
@@ -90,7 +94,7 @@ function App({ store }: { store: Store }) {
     window.setTimeout(() => setToasts((a) => a.filter((x) => x.id !== id)), t.action ? 7000 : 4000);
   }, []);
   const dismiss = (id: number) => setToasts((a) => a.filter((x) => x.id !== id));
-  const addBlock = useCallback((date?: string) => setWizard({ date }), []);
+  const addBlock = useCallback((date?: string) => setWizard({ date: date ?? logicalDateAt(new Date(), state.dayStartMinutes) }), [state.dayStartMinutes]);
   const deleteTask = (id: string) => {
     const t = state.tasks.find((x) => x.id === id);
     if (!t) return;
@@ -148,7 +152,7 @@ function App({ store }: { store: Store }) {
           </nav>
           <div className="side-foot">
             <SidebarClock />
-            <div className="saved"><CheckCircle2 size={14} /><span>{store.saveError ? "Saving blocked — export a backup" : "Saved in this browser"}</span></div>
+            <div className="saved"><CheckCircle2 size={14} /><span>{store.saveError ? "Cloud save failed" : "Synced to your account"}</span></div>
           </div>
         </aside>
 
@@ -163,11 +167,14 @@ function App({ store }: { store: Store }) {
               <button className="btn primary add-btn" onClick={() => addBlock()} aria-label="Add study block"><CalendarPlus size={16} /><span className="hide-md">Add study block</span></button>
               <ProfileMenu name={state.profile.name} theme={theme}
                 onProfile={() => go("profile")} onSettings={() => go("settings")} onToday={() => go("today")} onAddBlock={() => addBlock()} onPomodoro={openPomodoro}
-                onAddMock={() => go("mocks/new")} onTheme={() => store.setTheme(theme === "dark" ? "light" : "dark")} onExport={() => exportBackup(state)} onShortcuts={() => setHelp(true)} />
+                onAddMock={() => go("mocks/new")} onTheme={() => store.setTheme(theme === "dark" ? "light" : "dark")} onExport={() => go("settings")} onShortcuts={() => setHelp(true)} />
             </div>
           </header>
 
           <main key={route.page} className="page">
+            {notice && <div className="account-notice" role="status">{notice}</div>}
+            {store.syncError && <div className="warn" role="alert"><b>Cloud sync needs attention.</b> {store.syncError}</div>}
+            {accountMeta.deletionRequestedAt && <div className="account-notice warning" role="status">Account deletion is scheduled. Sign out and sign back in within 30 days to automatically restore your account. <button className="text-btn" onClick={() => void signOut()}>Sign out</button></div>}
             {route.page === "dashboard" && <Dashboard store={store} go={go} addBlock={() => addBlock()} onDelete={deleteTask} />}
             {route.page === "today" && <Today store={store} go={go} addBlock={() => addBlock()} onDelete={deleteTask} />}
             {route.page === "chapters" && <Chapters store={store} subject={subject} openSubject={(s) => go(`chapters/${s}`)} closeSubject={() => go("chapters")} />}
@@ -176,8 +183,8 @@ function App({ store }: { store: Store }) {
             {route.page === "revisions" && <Revisions store={store} go={go} />}
             {route.page === "mocks" && <Mocks key={route.param ?? ""} store={store} autoOpen={route.param === "new"} />}
             {route.page === "ai" && <AIManager store={store} />}
-            {route.page === "settings" && <Settings store={store} />}
-            {route.page === "profile" && <Profile store={store} go={go} exportBackup={() => exportBackup(state)} />}
+            {route.page === "settings" && <Settings store={store} user={user} accountMeta={accountMeta} signOut={signOut} />}
+            {route.page === "profile" && <Profile store={store} go={go} />}
           </main>
         </div>
 
@@ -206,7 +213,7 @@ function App({ store }: { store: Store }) {
             <dl className="shortcuts">{SHORTCUTS.map(([k, d]) => <div key={k}><dt><kbd>{k}</kbd></dt><dd>{d}</dd></div>)}</dl>
           </Modal>
         )}
-        {wizard && <EventWizard initialDate={wizard.date} chapters={state.chapters} tasks={state.tasks} onClose={() => setWizard(null)} onSave={saveTask} />}
+        {wizard && <EventWizard initialDate={wizard.date} dayStartMinutes={state.dayStartMinutes} chapters={state.chapters} tasks={state.tasks} onClose={() => setWizard(null)} onSave={saveTask} />}
         {pomo.fullscreen && <PomodoroScreen tasks={state.tasks} />}
 
         <div className="toasts" role="status" aria-live="polite">

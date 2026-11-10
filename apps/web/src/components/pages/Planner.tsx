@@ -3,19 +3,23 @@ import { useState } from "react";
 import { CalendarPlus, Trash2 } from "lucide-react";
 import { CardHead, EmptyState, Progress, Segmented } from "../ui";
 import { KIND_COLOR, KIND_LABEL, SUBJECT_SHORT } from "../../lib/constants";
-import { endTime, fmtDate, fmtMinutes, relativeDay, today } from "../../lib/date";
+import { addDays, endTime, fmtDate, fmtMinutes, logicalDateAt, tasksByLogicalDay } from "../../lib/date";
+import { useNow } from "../Now";
 import type { Store, Task } from "../../lib/store";
 
 type View = "upcoming" | "past" | "all";
 
 export default function Planner({ store, addBlock, onDelete }: { store: Store; addBlock: () => void; onDelete: (id: string) => void }) {
-  const { tasks, targetHours } = store.state;
+  const { tasks, targetHours, dayStartMinutes } = store.state;
   const [view, setView] = useState<View>("upcoming");
-  const t0 = today();
-  const visible = tasks.filter((t) => (view === "upcoming" ? t.date >= t0 : view === "past" ? t.date < t0 : true));
-  const dates = [...new Set(visible.map((t) => t.date))].sort((a, b) => (view === "past" ? b.localeCompare(a) : a.localeCompare(b)));
-  const upcomingCount = tasks.filter((t) => t.date >= t0).length;
-  const pastCount = tasks.filter((t) => t.date < t0).length;
+  const now = useNow();
+  const t0 = logicalDateAt(now, dayStartMinutes);
+  const byDay = tasksByLogicalDay(tasks, dayStartMinutes);
+  const allDates = [...byDay.keys()];
+  const dates = allDates.filter((date) => (view === "upcoming" ? date >= t0 : view === "past" ? date < t0 : true))
+    .sort((a, b) => (view === "past" ? b.localeCompare(a) : a.localeCompare(b)));
+  const upcomingCount = [...byDay].filter(([date]) => date >= t0).reduce((count, [, list]) => count + list.length, 0);
+  const pastCount = [...byDay].filter(([date]) => date < t0).reduce((count, [, list]) => count + list.length, 0);
 
   return (
     <section className="card">
@@ -31,10 +35,10 @@ export default function Planner({ store, addBlock, onDelete }: { store: Store; a
 
       {dates.length === 0 && <EmptyState title={view === "past" ? "No past blocks" : "No upcoming blocks"}>Add a study block to start planning your days.</EmptyState>}
       {dates.map((d) => {
-        const day = visible.filter((t) => t.date === d).sort((a, b) => a.time.localeCompare(b.time));
+        const day = byDay.get(d) ?? [];
         const planned = day.reduce((a, t) => a + t.minutes, 0);
         const done = day.filter((t) => t.done).reduce((a, t) => a + t.minutes, 0);
-        const rel = relativeDay(d);
+        const rel = d === t0 ? "Today" : d === addDays(t0, 1) ? "Tomorrow" : null;
         return (
           <div className="day-group" key={d}>
             <div className="day-head">

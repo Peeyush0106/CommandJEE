@@ -5,7 +5,8 @@ import { CardHead, Donut, EmptyState, PriorityBadge, Progress } from "../ui";
 import TaskRow from "../TaskRow";
 import { useNow } from "../Now";
 import { COUNTED_KINDS, PRIORITIES, STATUSES, SUBJECTS, SUBJECT_COLOR, SUBJECT_SHORT } from "../../lib/constants";
-import { addDays, fmtDate, fmtMinutes, toISO } from "../../lib/date";
+import { addDays, fmtDate, fmtMinutes, logicalDateAt, tasksByLogicalDay, tasksForLogicalDay, toISO } from "../../lib/date";
+import { studiedOn } from "../../lib/stats";
 import type { Store } from "../../lib/store";
 
 function Item({ icon, title, count, to, lines, empty, go }: { icon: React.ReactNode; title: string; count: number; to: string; lines: string[]; empty: string; go: (p: string) => void }) {
@@ -25,17 +26,17 @@ export default function Dashboard({ store, go, addBlock, onDelete }: { store: St
   const { state } = store;
   const { chapters, tasks, mocks } = state;
   const now = useNow();
-  const t0 = toISO(now);
+  const t0 = logicalDateAt(now, state.dayStartMinutes);
 
-  const todayTasks = tasks.filter((t) => t.date === t0).sort((a, b) => a.time.localeCompare(b.time));
+  const todayTasks = tasksForLogicalDay(tasks, t0, state.dayStartMinutes);
   const doneCount = todayTasks.filter((t) => t.done).length;
-  const doneMin = todayTasks.filter((t) => t.done && COUNTED_KINDS.includes(t.kind)).reduce((a, t) => a + t.minutes, 0);
+  const doneMin = studiedOn(state, t0);
   const target = state.targetHours * 60;
 
   const revisions = chapters.filter((c) => c.status === "revision");
   const weak = chapters.filter((c) => c.status === "complete_weak").sort((a, b) => a.priority.localeCompare(b.priority));
   const p1Pending = chapters.filter((c) => c.priority === "P1" && c.status === "pending");
-  const overdue = tasks.filter((t) => t.date < t0 && !t.done);
+  const overdue = [...tasksByLogicalDay(tasks, state.dayStartMinutes)].filter(([date]) => date < t0).flatMap(([, items]) => items.filter((t) => !t.done));
 
   const mastered = chapters.filter((c) => c.status === "mastery").length;
   const pct = Math.round((mastered / Math.max(chapters.length, 1)) * 100);
@@ -52,7 +53,7 @@ export default function Dashboard({ store, go, addBlock, onDelete }: { store: St
   const trackedTotal = subjectStats.reduce((a, s) => a + s.minutes, 0);
   const week = Array.from({ length: 7 }, (_, i) => {
     const date = addDays(t0, i - 6);
-    const minutes = tasks.filter((t) => t.done && t.date === date && COUNTED_KINDS.includes(t.kind)).reduce((a, t) => a + t.minutes, 0);
+    const minutes = studiedOn(state, date);
     return { date, minutes, label: fmtDate(date, { weekday: "short" }), isToday: date === t0 };
   });
   const maxMin = Math.max(target, ...week.map((d) => d.minutes), 60);

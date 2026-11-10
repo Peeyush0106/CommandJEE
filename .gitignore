@@ -8,3 +8,4 @@ dist
 .firebase-debug.log
 *.jks
 *.keystore
+*.tsbuildinfo

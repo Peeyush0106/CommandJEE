@@ -1,7 +1,6 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, type Firestore } from "firebase/firestore";
 
 const config = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -13,7 +12,11 @@ const config = {
 };
 
 export const firebaseReady = Boolean(config.apiKey && config.projectId && config.appId);
-const app = getApps().length ? getApps()[0] : initializeApp(config);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+const app = firebaseReady ? (getApps().length ? getApps()[0] : initializeApp(config)) : null;
+export const auth = app ? getAuth(app) : null;
+const globalCache = globalThis as typeof globalThis & { __commandJeeFirestore?: Firestore };
+export const db = app
+  ? typeof window !== "undefined"
+    ? globalCache.__commandJeeFirestore ?? (globalCache.__commandJeeFirestore = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }))
+    : getFirestore(app)
+  : null;

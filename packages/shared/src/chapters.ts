@@ -1,5 +1,5 @@
-import type { Chapter } from './types';
-export const CHAPTERS: Chapter[] = [
+import type { Chapter, ChapterStatus } from './types';
+const CHAPTER_DATA: Array<Omit<Chapter, 'status'> & { status: ChapterStatus | 'not_started' }> = [
   {
     "id": "ph-01",
     "subject": "Physics",
@@ -1032,3 +1032,8 @@ export const CHAPTERS: Chapter[] = [
     "pyqIndependent": 0
   }
 ];
+
+export const CHAPTERS: Chapter[] = CHAPTER_DATA.map((chapter) => ({
+  ...chapter,
+  status: chapter.status === 'not_started' ? 'pending' : chapter.status,
+}));

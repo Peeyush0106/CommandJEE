@@ -1,11 +1,73 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function owns(uid) { return signedIn() && request.auth.uid == uid; }
-    match /users/{uid}/{document=**} {
-      allow read, write: if owns(uid);
+    function verifiedOwner(uid) {
+      return request.auth != null
+        && request.auth.uid == uid
+        && request.auth.token.email_verified == true;
     }
+
+    function validWorkspace(data) {
+      let state = data.state;
+      return data.keys().hasOnly(['state'])
+        && data.keys().hasAll(['state'])
+        && state is map
+        && state.keys().hasOnly([
+          'chapters', 'tasks', 'mocks', 'classes', 'theme', 'targetHours',
+          'dayStartMinutes', 'examDate', 'focusLog', 'profile',
+          'onboardingComplete', 'weekStartsOn', 'pomodoroMinutes', 'security'
+        ])
+        && state.chapters is list && state.chapters.size() <= 1000
+        && state.tasks is list && state.tasks.size() <= 5000
+        && state.mocks is list && state.mocks.size() <= 1000
+        && state.classes is list && state.classes.size() <= 100
+        && state.focusLog is list && state.focusLog.size() <= 10000
+        && state.profile is map
+        && state.profile.keys().hasOnly(['name', 'targetScore', 'studentClass', 'attempt'])
+        && state.profile.name is string && state.profile.name.size() <= 40
+        && state.profile.targetScore is string && state.profile.targetScore.size() <= 40
+        && state.profile.studentClass is string && state.profile.studentClass.size() <= 40
+        && state.profile.attempt is string && state.profile.attempt.size() <= 40
+        && state.dayStartMinutes is int && state.dayStartMinutes >= 0 && state.dayStartMinutes <= 480
+        && state.dayStartMinutes % 30 == 0
+        && state.targetHours is number && state.targetHours >= 1 && state.targetHours <= 16
+        && state.pomodoroMinutes is int && state.pomodoroMinutes >= 5 && state.pomodoroMinutes <= 120
+        && state.theme in ['dark', 'light']
+        && state.weekStartsOn in ['monday', 'sunday']
+        && state.examDate is string && state.examDate.size() == 10
+        && state.onboardingComplete is bool
+        && state.security is map
+        && state.security.keys().hasOnly(['passkeysEnabled'])
+        && state.security.passkeysEnabled is bool;
+    }
+
+    function validAccountMeta(data) {
+      return data.keys().hasOnly([
+          'deletionRequestedAt', 'exportRequestedAt', 'exportAvailableAt', 'exportLastAt'
+        ])
+        && (!('deletionRequestedAt' in data) || data.deletionRequestedAt == null || data.deletionRequestedAt is int)
+        && (!('exportRequestedAt' in data) || data.exportRequestedAt is int)
+        && (!('exportAvailableAt' in data) || data.exportAvailableAt is int)
+        && (!('exportLastAt' in data) || data.exportLastAt is int)
+        && (!('exportDownloadedAt' in data) || data.exportDownloadedAt == null || data.exportDownloadedAt is int);
+    }
+
+    match /users/{uid}/workspace/{documentId} {
+      allow read: if verifiedOwner(uid) && documentId == 'state';
+      allow create, update: if verifiedOwner(uid)
+        && documentId == 'state'
+        && validWorkspace(request.resource.data);
+      allow delete: if verifiedOwner(uid) && documentId == 'state';
+    }
+
+    match /users/{uid}/account/{documentId} {
+      allow read: if verifiedOwner(uid) && documentId == 'state';
+      allow create, update: if verifiedOwner(uid)
+        && documentId == 'state'
+        && validAccountMeta(request.resource.data);
+      allow delete: if verifiedOwner(uid) && documentId == 'state';
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

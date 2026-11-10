@@ -28,7 +28,7 @@ export default function ProfileMenu(p: Props) {
       <button className="avatar" aria-haspopup="menu" aria-expanded={open} aria-label="Open profile menu" onClick={() => setOpen((o) => !o)}>{initials(p.name)}</button>
       {open && (
         <div className="menu" role="menu">
-          <div className="menu-head"><div className="avatar lg" aria-hidden>{initials(p.name)}</div><div><b>{p.name}</b><small>Local profile · saved in this browser</small></div></div>
+          <div className="menu-head"><div className="avatar lg" aria-hidden>{initials(p.name)}</div><div><b>{p.name}</b><small>Private cloud workspace</small></div></div>
           <div className="menu-label">Quick tools</div>
           <Item icon={<CalendarPlus size={16} />} label="Add study block" onClick={p.onAddBlock} kbd="N" />
           <Item icon={<Timer size={16} />} label="Open Pomodoro" onClick={p.onPomodoro} kbd="P" />
@@ -38,7 +38,7 @@ export default function ProfileMenu(p: Props) {
           <Item icon={<User size={16} />} label="Profile" onClick={p.onProfile} />
           <Item icon={<SettingsIcon size={16} />} label="Settings" onClick={p.onSettings} />
           <Item icon={p.theme === "dark" ? <Sun size={16} /> : <Moon size={16} />} label={`Switch to ${p.theme === "dark" ? "light" : "dark"} theme`} onClick={p.onTheme} />
-          <Item icon={<Download size={16} />} label="Export backup" onClick={p.onExport} />
+          <Item icon={<Download size={16} />} label="Manage data export" onClick={p.onExport} />
           <Item icon={<Keyboard size={16} />} label="Keyboard shortcuts" onClick={p.onShortcuts} kbd="?" />
         </div>
       )}
